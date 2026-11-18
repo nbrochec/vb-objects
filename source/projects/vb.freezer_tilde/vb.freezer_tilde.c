@@ -6,8 +6,14 @@
 #include "ext_buffer.h"
 #include "ext_systhread.h"
 #include <fftw3.h>
+#include <math.h>
+#include <stdlib.h>
+#include <stdint.h>
 
+// Accelerate (vDSP) is only available on macOS; Windows uses the plain C path below.
+#ifdef __APPLE__
 #define vDSP 1
+#endif
 
 #ifdef vDSP
 #include <Accelerate/Accelerate.h>
@@ -62,6 +68,7 @@ typedef struct _myObj {
 	t_systhread		x_systhread;		// thread reference
 	t_systhread_mutex	x_mutex;		// mutual exclusion lock for threadsafety
 	void				*x_qelem;
+	uint32_t			rngstate;		// per-object RNG state (rand() is per-thread on Windows and never seeded in the freeze thread)
 } t_myObj;
 
 
@@ -75,7 +82,7 @@ void myObj_clear(t_myObj *x);
 void myObj_freezeBuf(t_myObj *x);
 void do_freezeBuf(t_myObj *x);
 void *do_freeze(t_myObj *x);
-float getRand();
+float getRand(uint32_t *state);
 void myObj_dblclick(t_myObj *x);
 
 void myObj_dsp64(t_myObj *x, t_object *dsp64, short *count, double samplerate, 
@@ -132,10 +139,14 @@ void myObj_info(t_myObj *x) {
 	post("Loop size: %ld\nRec size: %ld\nreferenced buffer~: %s", x->n, x->nrec, x->bufname->s_name);
 }
 
-float getRand() {
-	//random floats [-1., 1.]
-	float out = ((float)rand() * RAND_SCALE)*2.f-1.f;
-	return out;
+float getRand(uint32_t *state) {
+	//random floats [-1., 1.] -- xorshift32, same behaviour on macOS and Windows
+	uint32_t s = *state;
+	s ^= s << 13;
+	s ^= s >> 17;
+	s ^= s << 5;
+	*state = s;
+	return ((float)(s >> 8) * (1.0f / 16777216.0f)) * 2.f - 1.f;
 }
 
 float fastSine(float x) {
@@ -416,7 +427,7 @@ void *do_freeze(t_myObj *x)
 	for(k=0; k<nchnls; k++) {		// step through buffer channels (k)
 		
 		for(i=1; i<n2; i++) {
-			rnd = getRand() * MY_PI ;		// randomize phases
+			rnd = getRand(&x->rngstate) * MY_PI ;		// randomize phases
 			//spec[i][0] =  in[i] * cosf(rnd);
 			//spec[i][1] =  in[i] * sinf(rnd);
 			
@@ -696,6 +707,8 @@ void *myObj_new(t_symbol *s, long nrec) {
 	
 	x->x_systhread = NULL;
 	systhread_mutex_new(&x->x_mutex,0);
+	x->rngstate = (uint32_t)gettime() ^ (uint32_t)(uintptr_t)x;
+	if(!x->rngstate) x->rngstate = 0x9E3779B9;
 	x->x_qelem = qelem_new(x,(method)output_info);
 	
 	return x;

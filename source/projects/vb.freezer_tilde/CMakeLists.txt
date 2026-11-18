@@ -19,8 +19,10 @@ add_library(
 if(APPLE)
 	target_link_libraries(${PROJECT_NAME} PUBLIC "-framework Accelerate")
 	target_link_libraries(${PROJECT_NAME} PUBLIC ${LIBS_PATH}/fftw/libfftw3f.a)
-else()
-	#target_link_libraries(${PROJECT_NAME} PUBLIC ${LIBSR_PATH}/build/src/Release/samplerate.lib)
+elseif(WIN32)
+	# FFTW (single precision), static. Provided by vcpkg (triplet x64-windows-static), see .github/workflows/windows-freezer.yml
+	find_package(FFTW3f CONFIG REQUIRED)
+	target_link_libraries(${PROJECT_NAME} PUBLIC FFTW3::fftw3f)
 endif()
 
 include(${CMAKE_CURRENT_SOURCE_DIR}/../../max-sdk-base/script/max-posttarget.cmake)
